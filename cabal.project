@@ -1,0 +1,2 @@
+packages: ./oai.cabal
+   , ./src/Zero/Zero.cabal

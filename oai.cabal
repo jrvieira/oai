@@ -1,0 +1,36 @@
+cabal-version: 3.0
+name: oai
+version: 0.1.0.0
+license: MIT
+license-file: LICENSE
+
+author: jrvieira
+maintainer: github@jrvieira.com
+
+build-type: Simple
+
+common warnings
+   ghc-options: -Wall
+
+executable oai
+   import: warnings
+   main-is: Main.hs
+   hs-source-dirs: app
+
+   ghc-options: -O2 -threaded -rtsopts -Wall
+
+   build-depends: base
+      , aeson
+      , safe-json
+      , bytestring
+      , text
+      , dlist
+      , strict
+      , process
+      , utf8-string
+      , Zero
+
+   other-modules: Oai.Transit
+
+   default-language: GHC2021
+   default-extensions: DuplicateRecordFields
