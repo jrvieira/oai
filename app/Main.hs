@@ -48,6 +48,7 @@ main = do
    let ctx = Ctx key sess file past (singleton $ sys sess) mempty
    _ <- system "clear"
    hSetBuffering stdout NoBuffering
+   hSetBuffering stdin NoBuffering
    putStrLn $ clr Bold $ clr Inverse $ clr Magenta $ unwords ["",sess,""]
    putStr "\n"
    input ctx
