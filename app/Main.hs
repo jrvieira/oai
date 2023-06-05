@@ -7,7 +7,7 @@ import Oai.Transit hiding ( id )
 import System.Environment
 import System.Directory ( createDirectoryIfMissing, getDirectoryContents )
 import System.Process
-import System.Console.Readline hiding ( message )
+import System.Console.Readline ( readline, addHistory )
 import System.IO
 import Data.Maybe ( catMaybes )
 import Data.Foldable ( toList )
@@ -68,12 +68,17 @@ main = do
 oai :: Ctx -> String -> IO ()
 oai ctx prompt
    | null prompt = input ctx
+   | ":q" <- prompt = putStr "\n" >> pure ()
+   | ":m" <- prompt = putStr "\n" >> input ctx { past = [] }
+   | (":f":f:q) <- words prompt = do
+      i <- readFile f
+      oai ctx $ unlines ["consider this:","","```",i,"```","",unwords q]
    | otherwise = do
-   putStr "\n"
-   logs' <- writeMem ctx "user" prompt
-   o <- createProcess (shell $ cmd $ req logs') { std_out = CreatePipe , std_err = NoStream }
-   ctx' <- res (ctx { logs = logs' }) o
-   input ctx'
+      putStr "\n"
+      logs' <- writeMem ctx "user" prompt
+      o <- createProcess (shell $ cmd $ req logs') { std_out = CreatePipe , std_err = NoStream }
+      ctx' <- res (ctx { logs = logs' }) o
+      input ctx'
 
    where
 
@@ -135,7 +140,6 @@ echo load
    , Just (json :: Response Delta) <- decodeStrict $ encodeUtf8 $ T.pack d = do
       let e = maybe "" id $ content $ delta $ head $ choices json
       putStr $ clr Magenta e
-      hFlush stdout
       pure e
    -- end of SSE stream
    | "data: [DONE]" <- load = do
