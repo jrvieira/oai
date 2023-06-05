@@ -28,6 +28,7 @@ executable oai
       , text
       , dlist
       , time
+      , readline
 
    other-modules: Oai.Transit
 

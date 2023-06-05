@@ -7,6 +7,7 @@ import Oai.Transit hiding ( id )
 import System.Environment
 import System.Directory ( createDirectoryIfMissing, getDirectoryContents )
 import System.Process
+import System.Console.Readline hiding ( message )
 import System.IO
 import Data.Maybe ( catMaybes )
 import Data.Foldable ( toList )
@@ -17,6 +18,7 @@ import Data.Text.Encoding ( encodeUtf8 )
 import Data.DList ( DList, singleton, snoc )
 import Data.Time.Clock ( getCurrentTime )
 import Data.Time.Format ( formatTime, defaultTimeLocale )
+import Control.Monad ( when )
 
 data Ctx = Ctx
    { key  :: String
@@ -26,6 +28,12 @@ data Ctx = Ctx
    , logs :: DList Message
    , pipe :: !(DList String)
    }
+
+input :: Ctx -> IO ()
+input ctx = do
+   prompt <- maybe "" id <$> readline ""
+   when (not $ null prompt) $ addHistory prompt
+   oai ctx prompt
 
 main :: IO ()
 main = do
@@ -42,7 +50,7 @@ main = do
    hSetBuffering stdout NoBuffering
    putStrLn $ clr Bold $ clr Inverse $ clr Magenta $ unwords ["",sess,""]
    putStr "\n"
-   getLine >>= oai ctx
+   input ctx
 
    where
 
@@ -58,12 +66,14 @@ main = do
 -- MAIN LOOP
 
 oai :: Ctx -> String -> IO ()
-oai ctx prompt = do
+oai ctx prompt
+   | null prompt = input ctx
+   | otherwise = do
    putStr "\n"
    logs' <- writeMem ctx "user" prompt
    o <- createProcess (shell $ cmd $ req logs') { std_out = CreatePipe , std_err = NoStream }
    ctx' <- res (ctx { logs = logs' }) o
-   getLine >>= oai ctx'
+   input ctx'
 
    where
 
