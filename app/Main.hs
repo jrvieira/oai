@@ -5,115 +5,145 @@ import Zero.Color
 import Oai.Transit hiding ( id )
 
 import System.Environment
+import System.Directory ( createDirectoryIfMissing, getDirectoryContents )
 import System.Process
-import System.IO ( Handle, hIsEOF, hGetLine )
+import System.IO
+import Data.Maybe ( catMaybes )
+import Data.Foldable ( toList )
 import Data.Aeson ( encode, decodeStrict, encodeFile, decodeFileStrict )
 import Data.ByteString.Lazy.UTF8 qualified as BU ( toString )
 import Data.Text qualified as T ( pack )
 import Data.Text.Encoding ( encodeUtf8 )
-import Data.DList ( DList, snoc )
-import Control.Monad ( forever )
+import Data.DList ( DList, singleton, snoc )
+import Data.Time.Clock ( getCurrentTime )
+import Data.Time.Format ( formatTime, defaultTimeLocale )
+
+data Ctx = Ctx
+   { key  :: String
+   , sess :: String
+   , file :: String
+   , past :: [Message]
+   , logs :: DList Message
+   , pipe :: !(DList String)
+   }
 
 main :: IO ()
 main = do
+   key  <- init <$> readFile "key.txt"
    sess <- head <$> getArgs
-   let file = "mem/" <> sess <> ".json"
-   _ <- system $ unwords ["touch",file,"&& clear"]
+   let path = "mem/" <> sess <> "/"
+   createDirectoryIfMissing True path
+   files <- filter (not . flip elem [".",".."]) <$> getDirectoryContents path
+   past <- fmap (mconcat . catMaybes) . sequence $ decodeFileStrict <$> (path <>) <$> files
+   time <- formatTime defaultTimeLocale "%Y%m%d%H%M%S" <$> getCurrentTime
+   let file = path <> time <> ".json"
+   let ctx = Ctx key sess file past (singleton $ sys sess) mempty
+   _ <- system "clear"
+   hSetBuffering stdout NoBuffering
    putStrLn $ clr Bold $ clr Inverse $ clr Magenta $ unwords ["",sess,""]
    putStr "\n"
-   forever $ getLine >>= oai sess
-
-oai :: String -> String -> IO ()
-oai sess prompt = do
-   ctx <- mem "user" prompt
-   putStr "\n"
-   o <- createProcess (shell $ cmd ctx) { std_out = CreatePipe , std_err = NoStream }
-   res "" o
+   getLine >>= oai ctx
 
    where
 
-   sys :: Message
-   sys = Message { role = Just "system" , content = Just prime , name = Just sess }
+   sys :: String -> Message
+   sys sess = Message
+      { role = Just "system"
+      , content = Just prime
+      , name = Just sess
+      }
       where
       prime = "You are a humble robot that gives short and to the point answers."
 
-   cmd :: [Message] -> String
-   cmd ctx = "curl https://api.openai.com/v1/chat/completions \
-          \-H 'Content-Type: application/json' \
-          \-H 'Authorization: Bearer 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' \
-          \-d '" <> (BU.toString $ encode $ req ctx) <> "'"
+-- MAIN LOOP
 
-   req :: [Message] -> Request
-   req ctx = Request
+oai :: Ctx -> String -> IO ()
+oai ctx prompt = do
+   putStr "\n"
+   logs' <- writeMem ctx "user" prompt
+   o <- createProcess (shell $ cmd $ req logs') { std_out = CreatePipe , std_err = NoStream }
+   ctx' <- res (ctx { logs = logs' }) o
+   getLine >>= oai ctx'
+
+   where
+
+   cmd :: Request -> String
+   cmd r = unwords
+      [ "curl https://api.openai.com/v1/chat/completions"
+      , "-H 'Content-Type: application/json'"
+      , "-H 'Authorization: Bearer " <> key ctx <> "'"
+      , "-d '" <> (escape $ BU.toString $ encode r) <> "'"
+      ]
+      where
+      escape :: String -> String
+      escape [] = []
+      escape (x:xs)
+         | '\'' <- x = "'\\''" <> escape xs
+         | otherwise = x : escape xs
+
+
+   req :: DList Message -> Request
+   req l = Request
       { model = "gpt-3.5-turbo"
-      , messages = sys : ctx
+      , messages = past ctx <> toList l
       , top_p = Just 0.01
-      , stream = Just False
+      , stream = Just True
       }
 
-   res :: String -> (Maybe Handle,Maybe Handle,Maybe Handle,ProcessHandle) -> IO ()
-   res msg h
+res :: Ctx -> (Maybe Handle,Maybe Handle,Maybe Handle,ProcessHandle) -> IO Ctx
+res ctx h
 
-      | False  # unwords ["res",msg] = undefined
+   | (i,Nothing,e,_) <- h = do
+      il <- maybe (pure "no handle for stdin") hGetLine i
+      el <- maybe (pure "no handle for stderr") hGetLine e
+      putStr $ clr Blue $ "stdin: " <> il
+      putStr $ clr Red $ "stderr: " <> el
+      pure ctx
 
-      | (i,Nothing,e,_) <- h = do
-         stdin <- maybe (pure "no handle for stdin") hGetLine i
-         stderr <- maybe (pure "no handle for stderr") hGetLine e
-         putStr $ clr Blue $ "stdin: " <> stdin
-         putStr $ clr Red $ "stderr: " <> stderr
-
-      | (_,Just o,_,_) <- h = do
-         eof <- hIsEOF o
-         if eof then do
-            _ <- mem "assistant" msg
-            putStr "\n"
-         else do
-            l <- hGetLine o
-            s <- say l
-            res s h
-
-   say :: String -> IO String
-   say load
-
-      | null load = pure ""
-
-      | Just (json :: Response Choice) <- decodeStrict $ encodeUtf8 $ T.pack load = do
-         let msg = maybe "" id $ content $ message $ head $ choices json
-         putStrLn $ clr Magenta msg
-         pure msg
-
-      | ("data: ",d) <- splitAt 6 load
-      , Just (json :: Response Delta) <- decodeStrict $ encodeUtf8 $ T.pack d = do
-         let msg = maybe "" id $ content $ delta $ head $ choices json
-         putStr $ clr Magenta msg
-         pure msg
-
-      | "data: [DONE]" <- load = putStr "\n" >> pure ""
-      | otherwise = putStrLn (clr Red load) >> pure ""
-
-   mem :: String -> String -> IO [Message]
-   mem r c = do
-      let file = "mem/" <> sess <> ".json"
-      p :: [Message] <- maybe (error "mem") id <$> decodeFileStrict file
-      let past = p <> [Message { role = Just r , content = Just c , name = Just sess }]
-      if null c then do
-         pure past
+   | (_,Just o,_,_) <- h = do
+      eof <- hIsEOF o
+      if eof then do
+         logs' <- writeMem ctx "assistant" (concat $ toList $ pipe ctx)
+         putStr "\n"
+         pure $ ctx { logs = logs' , pipe = mempty }
       else do
-         encodeFile file past
-         pure past
+         ol <- hGetLine o
+         e <- echo ol
+         res (ctx { pipe = snoc (pipe ctx) e }) h
 
-   writeMem :: String -> DList Message -> IO ()
-   writeMem r d = do
-      -- d will be a DList in memory instead of:
-      -- past <> [Message { role = Just r , content = Just c , name = Just sess }]
-      -- turn into YYYYMMDD-N.json
-      let file = "mem/" <> sess <> ".json"
-      encodeFile file d
-      pure ()
+echo :: String -> IO String
+echo load
+   -- ignore empty load
+   | null load = pure ""
+   -- normal response
+   | Just (json :: Response Choice) <- decodeStrict $ encodeUtf8 $ T.pack load = do
+      let e = maybe "" id $ content $ message $ head $ choices json
+      putStrLn $ clr Magenta e
+      pure e
+   -- Server Sent Event stream
+   | ("data: ",d) <- splitAt 6 load
+   , Just (json :: Response Delta) <- decodeStrict $ encodeUtf8 $ T.pack d = do
+      let e = maybe "" id $ content $ delta $ head $ choices json
+      putStr $ clr Magenta e
+      hFlush stdout
+      pure e
+   -- end of SSE stream
+   | "data: [DONE]" <- load = do
+      putStr "\n"
+      pure ""
+   -- otherwise
+   | otherwise = do
+      putStrLn (clr Red load)
+      pure ""
 
-   readMem :: IO [Message]
-   readMem = do
-      -- turn into files :: [file]
-      let file = "mem/" <> sess <> ".json"
-      maybe (error "readMem") id <$> decodeFileStrict file
+writeMem :: Ctx -> String -> String -> IO (DList Message)
+writeMem ctx r c = do
+   encodeFile (file ctx) logs'
+   pure logs'
+   where
+   logs' = snoc (logs ctx) $ Message
+      { role = Just r
+      , content = Just c
+      , name = Just $ sess ctx
+      }
 

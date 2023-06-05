@@ -20,15 +20,14 @@ executable oai
    ghc-options: -O2 -threaded -rtsopts -Wall
 
    build-depends: base
+      , Zero
+      , directory
+      , process
       , aeson
-      , safe-json
-      , bytestring
+      , utf8-string
       , text
       , dlist
-      , strict
-      , process
-      , utf8-string
-      , Zero
+      , time
 
    other-modules: Oai.Transit
 

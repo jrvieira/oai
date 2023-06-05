@@ -16,7 +16,7 @@ data Message = Message
    { role :: Maybe String
    , content :: Maybe String
    , name :: Maybe String
-   } deriving (Generic, Show)
+   } deriving Generic
 
 instance ToJSON Message
 instance FromJSON Message
