@@ -5,7 +5,7 @@ import Zero.Color
 import Oai.Transit hiding ( id )
 
 import System.Environment
-import System.Directory ( createDirectoryIfMissing, getDirectoryContents )
+import System.Directory ( createDirectoryIfMissing, listDirectory )
 import System.Process
 import System.Console.Readline ( readline, addHistory )
 import System.IO
@@ -26,14 +26,17 @@ data Ctx = Ctx
    , file :: String
    , past :: [Message]
    , logs :: DList Message
-   , pipe :: !(DList String)
+   , pipe :: DList String
    }
 
-input :: Ctx -> IO ()
-input ctx = do
-   prompt <- maybe "" id <$> readline ""
-   when (not $ null prompt) $ addHistory prompt
-   oai ctx prompt
+sys :: Message
+sys = Message
+   { role = Just "system"
+   , content = Just prime
+   , name = Nothing
+   }
+   where
+   prime = "You are a humble robot that gives short and to the point answers."
 
 main :: IO ()
 main = do
@@ -41,39 +44,53 @@ main = do
    sess <- head <$> getArgs
    let path = "mem/" <> sess <> "/"
    createDirectoryIfMissing True path
-   files <- filter (not . flip elem [".",".."]) <$> getDirectoryContents path
+   files <- listDirectory path
    past <- fmap (mconcat . catMaybes) . sequence $ decodeFileStrict <$> (path <>) <$> files
    time <- formatTime defaultTimeLocale "%Y%m%d%H%M%S" <$> getCurrentTime
    let file = path <> time <> ".json"
-   let ctx = Ctx key sess file past (singleton $ sys sess) mempty
+   let ctx = Ctx key sess file past (singleton sys) mempty
+   -- add past to commandline history
+   mapM_ (addHistory . maybe "" id . content) $ filter ((Just "user" ==) . role) past
    _ <- system "clear"
    hSetBuffering stdout NoBuffering
-   hSetBuffering stdin NoBuffering
+-- hSetBuffering stdin NoBuffering
    putStrLn $ clr Bold $ clr Inverse $ clr Magenta $ unwords ["",sess,""]
    putStr "\n"
    input ctx
 
-   where
-
-   sys :: String -> Message
-   sys sess = Message
-      { role = Just "system"
-      , content = Just prime
-      , name = Just sess
-      }
-      where
-      prime = "You are a humble robot that gives short and to the point answers."
+input :: Ctx -> IO ()
+input ctx = do
+   hSetEcho stdin True
+   prompt <- maybe "" id <$> readline ""
+   hSetEcho stdin False
+   when (not $ null prompt) $ addHistory prompt
+   oai ctx prompt
 
 -- MAIN LOOP
 
 oai :: Ctx -> String -> IO ()
 oai ctx prompt
    | null prompt = input ctx
+   -- quit
    | ":q" <- prompt = putStr "\n" >> pure ()
-   | ":m" <- prompt = putStr "\n" >> input ctx { past = [] }
+   -- clear past context
+   | ":c" <- prompt = do
+      internal (ctx { past = [] }) "cleared past context"
+   -- list sessions
+   | ":l" <- prompt = do
+      l <- listDirectory "mem"
+      internal ctx $ unwords $ "list sessions:" : map (\s -> "'" <> s <> "'") l
+   -- get current session
+   | ":s" <- prompt = do
+      internal ctx $ unwords ["session:",sess ctx]
+   -- fail on non-existing commands
+   | ':' <- head prompt = do
+      internal ctx $ unwords ["^not a command",head $ words prompt]
+   -- include file
    | (":f":f:q) <- words prompt = do
       i <- readFile f
       oai ctx $ unlines ["consider this:","","```",i,"```","",unwords q]
+   -- normal prompt
    | otherwise = do
       putStr "\n"
       logs' <- writeMem ctx "user" prompt
@@ -83,7 +100,14 @@ oai ctx prompt
 
    where
 
+   internal :: Ctx -> String -> IO ()
+   internal ctx' s = do
+      putStrLn $ clr Dim $ ' ' : s
+      putStr "\n"
+      input ctx'
+
    cmd :: Request -> String
+-- cmd r | False  # (BU.toString $ encode r) = undefined
    cmd r = unwords
       [ "curl https://api.openai.com/v1/chat/completions"
       , "-H 'Content-Type: application/json'"
@@ -97,14 +121,23 @@ oai ctx prompt
          | '\'' <- x = "'\\''" <> escape xs
          | otherwise = x : escape xs
 
-
    req :: DList Message -> Request
    req l = Request
       { model = "gpt-3.5-turbo"
       , messages = past ctx <> toList l
       , top_p = Just 0.01
       , stream = Just True
+      , frequency_penalty = Just 1
+      , temperature = Nothing
+      , n = Nothing
+      , stop = Nothing
+      , max_tokens = Nothing
+      , presence_penalty = Nothing
+      , logit_bias = Nothing
+      , user = Nothing
       }
+
+-- IO
 
 res :: Ctx -> (Maybe Handle,Maybe Handle,Maybe Handle,ProcessHandle) -> IO Ctx
 res ctx h
@@ -136,16 +169,17 @@ echo load
       let e = maybe "" id $ content $ message $ head $ choices json
       putStrLn $ clr Magenta e
       pure e
-   -- Server Sent Event stream
-   | ("data: ",d) <- splitAt 6 load
-   , Just (json :: Response Delta) <- decodeStrict $ encodeUtf8 $ T.pack d = do
-      let e = maybe "" id $ content $ delta $ head $ choices json
-      putStr $ clr Magenta e
-      pure e
-   -- end of SSE stream
+   -- end of openai's Server Sent Event stream
    | "data: [DONE]" <- load = do
       putStr "\n"
       pure ""
+   -- SSE stream
+   | ("data: ",d) <- splitAt 6 load , Just (json :: Response Delta) <- decodeStrict $ encodeUtf8 $ T.pack d = do
+      let e = maybe "" id $ content $ delta $ head $ choices json
+      hFlush stdout
+      putStr $ clr Magenta e
+      hFlush stdout
+      pure e
    -- otherwise
    | otherwise = do
       putStrLn (clr Red load)

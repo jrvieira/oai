@@ -6,11 +6,20 @@ import Data.Aeson
 data Request = Request
    { model :: String
    , messages :: [Message]
+   , temperature :: Maybe Double
    , top_p :: Maybe Double
+   , n :: Maybe Int
    , stream :: Maybe Bool
+   , stop :: Maybe [String]
+   , max_tokens :: Maybe Int
+   , presence_penalty :: Maybe Double
+   , frequency_penalty :: Maybe Double
+   , logit_bias :: Maybe (String,Int)
+   , user :: Maybe String
    } deriving Generic
 
-instance ToJSON Request
+instance ToJSON Request where
+   toJSON = genericToJSON defaultOptions { omitNothingFields = True }
 
 data Message = Message
    { role :: Maybe String
@@ -18,7 +27,8 @@ data Message = Message
    , name :: Maybe String
    } deriving Generic
 
-instance ToJSON Message
+instance ToJSON Message where
+   toJSON = genericToJSON defaultOptions { omitNothingFields = True }
 instance FromJSON Message
 
 data Response a = Response
