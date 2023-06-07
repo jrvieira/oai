@@ -40,7 +40,7 @@ sys = Message
 
 main :: IO ()
 main = do
-   key  <- init <$> readFile "key.txt"
+   key  <- head . lines <$> readFile "key.txt"
    sess <- head <$> getArgs
    let path = "mem/" <> sess <> "/"
    createDirectoryIfMissing True path
@@ -53,7 +53,6 @@ main = do
    mapM_ (addHistory . maybe "" id . content) $ filter ((Just "user" ==) . role) past
    _ <- system "clear"
    hSetBuffering stdout NoBuffering
--- hSetBuffering stdin NoBuffering
    putStrLn $ clr Bold $ clr Inverse $ clr Magenta $ unwords ["",sess,""]
    putStr "\n"
    input ctx
@@ -83,13 +82,13 @@ oai ctx prompt
    -- get current session
    | ":s" <- prompt = do
       internal ctx $ unwords ["session:",sess ctx]
-   -- fail on non-existing commands
-   | ':' <- head prompt = do
-      internal ctx $ unwords ["^not a command",head $ words prompt]
    -- include file
    | (":f":f:q) <- words prompt = do
       i <- readFile f
       oai ctx $ unlines ["consider this:","","```",i,"```","",unwords q]
+   -- fail on non-existing commands
+   | ':' <- head prompt = do
+      internal ctx $ unwords ["^not a command",head $ words prompt]
    -- normal prompt
    | otherwise = do
       putStr "\n"
@@ -110,6 +109,7 @@ oai ctx prompt
 -- cmd r | False  # (BU.toString $ encode r) = undefined
    cmd r = unwords
       [ "curl https://api.openai.com/v1/chat/completions"
+      , "--no-buffer"
       , "-H 'Content-Type: application/json'"
       , "-H 'Authorization: Bearer " <> key ctx <> "'"
       , "-d '" <> (escape $ BU.toString $ encode r) <> "'"
@@ -161,7 +161,7 @@ res ctx h
          res (ctx { pipe = snoc (pipe ctx) e }) h
 
 echo :: String -> IO String
-echo load
+echo !load
    -- ignore empty load
    | null load = pure ""
    -- normal response
@@ -176,9 +176,7 @@ echo load
    -- SSE stream
    | ("data: ",d) <- splitAt 6 load , Just (json :: Response Delta) <- decodeStrict $ encodeUtf8 $ T.pack d = do
       let e = maybe "" id $ content $ delta $ head $ choices json
-      hFlush stdout
       putStr $ clr Magenta e
-      hFlush stdout
       pure e
    -- otherwise
    | otherwise = do
