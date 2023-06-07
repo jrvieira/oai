@@ -79,9 +79,10 @@ oai ctx prompt
    | ":l" <- prompt = do
       l <- listDirectory "mem"
       internal ctx $ unwords $ "list sessions:" : map (\s -> "'" <> s <> "'") l
-   -- get current session
+   -- save current session
    | ":s" <- prompt = do
-      internal ctx $ unwords ["session:",sess ctx]
+      appendFile ("mem/" <> sess ctx <> ".txt") (export $ logs ctx)
+      internal ctx $ unwords ["saved:",sess ctx]
    -- include file
    | (":f":f:q) <- words prompt = do
       i <- readFile f
@@ -194,3 +195,8 @@ writeMem ctx r c = do
       , name = Just $ sess ctx
       }
 
+export :: DList Message -> String
+export = unlines . map write . toList
+   where
+   write :: Message -> String
+   write m = unwords [maybe "" id $ role m,":",maybe "" id $ content m,"\n"]
