@@ -162,7 +162,7 @@ res ctx h
          res (ctx { pipe = snoc (pipe ctx) e }) h
 
 echo :: String -> IO String
-echo !load
+echo load
    -- ignore empty load
    | null load = pure ""
    -- normal response
