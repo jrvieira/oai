@@ -1,11 +1,10 @@
 module Main where
 
-import Zero
 import Zero.Color
 import Oai.Transit hiding ( id )
 
 import System.Environment
-import System.Directory ( createDirectoryIfMissing, listDirectory )
+import System.Directory ( createDirectoryIfMissing, listDirectory, doesFileExist )
 import System.Process
 import System.Console.Readline ( readline, addHistory )
 import System.IO
@@ -55,60 +54,68 @@ main = do
    hSetBuffering stdout NoBuffering
    putStrLn $ clr Bold $ clr Inverse $ clr Magenta $ unwords ["",sess,""]
    putStr "\n"
-   input ctx
+   wait ctx
 
-input :: Ctx -> IO ()
-input ctx = do
+wait :: Ctx -> IO ()
+wait ctx = do
    hSetEcho stdin True
    prompt <- maybe "" id <$> readline ""
    hSetEcho stdin False
    when (not $ null prompt) $ addHistory prompt
-   oai ctx prompt
+   loop ctx prompt
 
 -- MAIN LOOP
 
-oai :: Ctx -> String -> IO ()
-oai ctx prompt
-   | null prompt = input ctx
-   -- quit
-   | ":q" <- prompt = putStr "\n" >> pure ()
-   -- clear past context
-   | ":c" <- prompt = do
-      internal (ctx { past = [] }) "cleared past context"
-   -- list sessions
-   | ":l" <- prompt = do
-      l <- listDirectory "mem"
-      internal ctx $ unwords $ "list sessions:" : map (\s -> "'" <> s <> "'") l
-   -- save current session
-   | ":s" <- prompt = do
-      appendFile ("mem/" <> sess ctx <> ".txt") (export $ logs ctx)
-      internal ctx $ unwords ["saved:",sess ctx]
-   -- include file
-   | (":f":f:q) <- words prompt = do
-      i <- readFile f
-      oai ctx $ unlines ["consider this:","","```",i,"```","",unwords q]
-   -- fail on non-existing commands
-   | ':' <- head prompt = do
-      internal ctx $ unwords ["^not a command",head $ words prompt]
-   -- normal prompt
+loop :: Ctx -> String -> IO ()
+loop ctx prompt
+   | null prompt = wait ctx
+   | ':' <- head prompt = comm
    | otherwise = do
       putStr "\n"
-      logs' <- writeMem ctx "user" prompt
-      o <- createProcess (shell $ cmd $ req logs') { std_out = CreatePipe , std_err = NoStream }
+      logs' <- mem ctx "user" prompt
+      o <- createProcess (shell $ call $ req logs') { std_out = CreatePipe , std_err = NoStream }
       ctx' <- res (ctx { logs = logs' }) o
-      input ctx'
+      wait ctx'
 
    where
 
-   internal :: Ctx -> String -> IO ()
-   internal ctx' s = do
-      putStrLn $ clr Dim $ ' ' : s
-      putStr "\n"
-      input ctx'
+   comm :: IO ()
+   comm
+      -- quit
+      | ":q" <- prompt = pure ()
+      -- clear past context
+      | ":c" <- prompt = do
+         tell "cleared past context"
+         wait (ctx { past = [] })
+      -- list sessions
+      | ":l" <- prompt = do
+         l <- listDirectory "mem"
+         tell $ unwords $ "list sessions:" : map (\s -> "'" <> s <> "'") l
+         wait ctx
+      -- save current session
+      | ":s" <- prompt = do
+         appendFile ("mem/" <> sess ctx <> ".txt") (unlines $ map (\m -> unwords [maybe "" id $ role m,":",maybe "" id $ content m,"\n"]) $ toList $ logs ctx)
+         tell $ unwords ["saved:",sess ctx]
+         wait ctx
+      -- include file
+      | (":f":f:q) <- words prompt = do
+         e <- doesFileExist f
+         if e then do
+            i <- readFile f
+            loop ctx $ unlines ["consider this:","","```",i,"```","",unwords q]
+         else do
+            tell "file not found"
+            wait ctx
+      -- no command
+      | otherwise = do
+         tell $ unwords ["^no command",head $ words prompt]
+         wait ctx
 
-   cmd :: Request -> String
--- cmd r | False  # (BU.toString $ encode r) = undefined
-   cmd r = unwords
+   tell :: String -> IO ()
+   tell s = putStrLn $ clr Dim $ ' ' : s <> "\n"
+
+   call :: Request -> String
+   call r = unwords
       [ "curl https://api.openai.com/v1/chat/completions"
       , "--no-buffer"
       , "-H 'Content-Type: application/json'"
@@ -153,7 +160,7 @@ res ctx h
    | (_,Just o,_,_) <- h = do
       eof <- hIsEOF o
       if eof then do
-         logs' <- writeMem ctx "assistant" (concat $ toList $ pipe ctx)
+         logs' <- mem ctx "assistant" (concat $ toList $ pipe ctx)
          putStr "\n"
          pure $ ctx { logs = logs' , pipe = mempty }
       else do
@@ -161,31 +168,33 @@ res ctx h
          e <- echo ol
          res (ctx { pipe = snoc (pipe ctx) e }) h
 
-echo :: String -> IO String
-echo load
-   -- ignore empty load
-   | null load = pure ""
-   -- normal response
-   | Just (json :: Response Choice) <- decodeStrict $ encodeUtf8 $ T.pack load = do
-      let e = maybe "" id $ content $ message $ head $ choices json
-      putStrLn $ clr Magenta e
-      pure e
-   -- end of openai's Server Sent Event stream
-   | "data: [DONE]" <- load = do
-      putStr "\n"
-      pure ""
-   -- SSE stream
-   | ("data: ",d) <- splitAt 6 load , Just (json :: Response Delta) <- decodeStrict $ encodeUtf8 $ T.pack d = do
-      let e = maybe "" id $ content $ delta $ head $ choices json
-      putStr $ clr Magenta e
-      pure e
-   -- otherwise
-   | otherwise = do
-      putStrLn (clr Red load)
-      pure ""
+   where
 
-writeMem :: Ctx -> String -> String -> IO (DList Message)
-writeMem ctx r c = do
+   echo :: String -> IO String
+   echo load
+      -- ignore empty load
+      | null load = pure ""
+      -- normal response
+      | Just (json :: Response Choice) <- decodeStrict $ encodeUtf8 $ T.pack load = do
+         let e = maybe "" id $ content $ message $ head $ choices json
+         putStrLn $ clr Magenta e
+         pure e
+      -- end of openai's Server Sent Event stream
+      | "data: [DONE]" <- load = do
+         putStr "\n"
+         pure ""
+      -- SSE stream
+      | ("data: ",d) <- splitAt 6 load , Just (json :: Response Delta) <- decodeStrict $ encodeUtf8 $ T.pack d = do
+         let e = maybe "" id $ content $ delta $ head $ choices json
+         putStr $ clr Magenta e
+         pure e
+      -- otherwise
+      | otherwise = do
+         putStrLn (clr Red load)
+         pure ""
+
+mem :: Ctx -> String -> String -> IO (DList Message)
+mem ctx r c = do
    encodeFile (file ctx) logs'
    pure logs'
    where
@@ -195,8 +204,3 @@ writeMem ctx r c = do
       , name = Just $ sess ctx
       }
 
-export :: DList Message -> String
-export = unlines . map write . toList
-   where
-   write :: Message -> String
-   write m = unwords [maybe "" id $ role m,":",maybe "" id $ content m,"\n"]
