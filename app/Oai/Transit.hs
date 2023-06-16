@@ -6,6 +6,8 @@ import Data.Aeson
 data Request = Request
    { model :: String
    , messages :: [Message]
+   , functions :: Maybe [Function]
+   , function_call :: Maybe (Either String Function)
    , temperature :: Maybe Double
    , top_p :: Maybe Double
    , n :: Maybe Int
@@ -22,14 +24,25 @@ instance ToJSON Request where
    toJSON = genericToJSON defaultOptions { omitNothingFields = True }
 
 data Message = Message
-   { role :: Maybe String
+   { role :: Maybe String  -- required only on Request
    , content :: Maybe String
    , name :: Maybe String
+   , function_call :: Maybe Function
    } deriving Generic
 
 instance ToJSON Message where
    toJSON = genericToJSON defaultOptions { omitNothingFields = True }
 instance FromJSON Message
+
+data Function = Function
+   { name :: String
+   , description :: Maybe String
+   , parameters :: Maybe Value
+   } deriving Generic
+
+instance ToJSON Function where
+   toJSON = genericToJSON defaultOptions { omitNothingFields = True }
+instance FromJSON Function
 
 data Response a = Response
    { id :: String

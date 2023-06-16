@@ -4,7 +4,7 @@ import Zero.Color
 import Oai.Transit hiding ( id )
 
 import System.Environment
-import System.Directory ( createDirectoryIfMissing, listDirectory, doesFileExist )
+import System.Directory ( createDirectoryIfMissing, listDirectory, doesFileExist, removeFile )
 import System.Process
 import System.Console.Readline ( readline, addHistory )
 import System.IO
@@ -33,6 +33,7 @@ sys = Message
    { role = Just "system"
    , content = Just prime
    , name = Nothing
+   , function_call = Nothing
    }
    where
    prime = "You are a humble robot that gives short and to the point answers."
@@ -83,6 +84,12 @@ loop ctx prompt
    comm
       -- quit
       | ":q" <- prompt = pure ()
+      -- restart (beta)
+      | ":r" <- prompt = do
+         e <- doesFileExist $ file ctx
+         when e $ removeFile $ file ctx
+         tell "restart session"
+         main
       -- clear past context
       | ":c" <- prompt = do
          tell "cleared past context"
@@ -133,14 +140,16 @@ loop ctx prompt
    req l = Request
       { model = "gpt-3.5-turbo"
       , messages = past ctx <> toList l
-      , top_p = Just 0.01
-      , stream = Just True
-      , frequency_penalty = Just 1
+      , functions = Nothing
+      , function_call = Nothing
       , temperature = Nothing
+      , top_p = Just 0.01
       , n = Nothing
+      , stream = Just True
       , stop = Nothing
       , max_tokens = Nothing
       , presence_penalty = Nothing
+      , frequency_penalty = Just 1
       , logit_bias = Nothing
       , user = Nothing
       }
@@ -202,5 +211,6 @@ mem ctx r c = do
       { role = Just r
       , content = Just c
       , name = Just $ sess ctx
+      , function_call = Nothing
       }
 
