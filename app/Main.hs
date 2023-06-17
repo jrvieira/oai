@@ -48,7 +48,7 @@ main = do
    past <- fmap (mconcat . catMaybes) . sequence $ decodeFileStrict <$> (path <>) <$> files
    time <- formatTime defaultTimeLocale "%Y%m%d%H%M%S" <$> getCurrentTime
    let file = path <> time <> ".json"
-   let ctx = Ctx key sess file past (singleton sys) mempty
+   let ctx = Ctx key sess file (if sess == "none" then mempty else past) (singleton sys) mempty
    -- add past to commandline history
    mapM_ (addHistory . maybe "" id . content) $ filter ((Just "user" ==) . role) past
    _ <- system "clear"
