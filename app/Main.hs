@@ -8,7 +8,7 @@ import System.Directory ( createDirectoryIfMissing, listDirectory, doesFileExist
 import System.Process
 import System.Console.Readline ( readline, addHistory )
 import System.IO
-import Data.Maybe ( catMaybes )
+import Data.Maybe ( listToMaybe, catMaybes )
 import Data.Foldable ( toList )
 import Data.Aeson ( encode, decodeStrict, encodeFile, decodeFileStrict )
 import Data.ByteString.Lazy.UTF8 qualified as BU ( toString )
@@ -41,7 +41,7 @@ sys = Message
 main :: IO ()
 main = do
    key  <- head . lines <$> readFile "key.txt"
-   sess <- head <$> getArgs
+   sess <- maybe "none" id . listToMaybe <$> getArgs
    let path = "mem/" <> sess <> "/"
    createDirectoryIfMissing True path
    files <- listDirectory path
