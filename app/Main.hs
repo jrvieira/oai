@@ -9,6 +9,7 @@ import System.Process
 import System.Console.Readline ( readline, addHistory )
 import System.IO
 import Data.Maybe ( listToMaybe, catMaybes )
+import Data.List ( intercalate )
 import Data.Foldable ( toList )
 import Data.Aeson ( encode, decodeStrict, encodeFile, decodeFileStrict )
 import Data.ByteString.Lazy.UTF8 qualified as BU ( toString )
@@ -82,6 +83,10 @@ loop ctx prompt
 
    comm :: IO ()
    comm
+      -- help
+      | ":h" <- prompt = do
+         tell "help\n\n:q\tquit\n:l\tlist sessions\n:s\tsave current session to a human readable format\n:c\tclear past context (keeps current session)\n:f ...\tinclude a file"
+         wait ctx
       -- quit
       | ":q" <- prompt = pure ()
       -- restart (beta)
@@ -90,20 +95,22 @@ loop ctx prompt
          when e $ removeFile $ file ctx
          tell "restart session"
          main
-      -- clear past context
-      | ":c" <- prompt = do
-         tell "cleared past context"
-         wait (ctx { past = [] })
       -- list sessions
       | ":l" <- prompt = do
          l <- listDirectory "mem"
-         tell $ unwords $ "list sessions:" : map (\s -> "'" <> s <> "'") l
+         tell "list sessions"
+         putStrLn $ clr Bold $ intercalate " " $ (clr Bold $ clr Inverse $ clr Magenta $ unwords ["",sess ctx,""]) : ((\s -> clr Inverse $ unwords ["",s,""]) <$> filter (/= sess ctx) l)
+         putStrLn ""
          wait ctx
       -- save current session
       | ":s" <- prompt = do
          appendFile ("mem/" <> sess ctx <> ".txt") (unlines $ map (\m -> unwords [maybe "" id $ role m,":",maybe "" id $ content m,"\n"]) $ toList $ logs ctx)
          tell $ unwords ["saved:",sess ctx]
          wait ctx
+      -- clear past context
+      | ":c" <- prompt = do
+         tell "cleared past context"
+         wait (ctx { past = [] })
       -- include file
       | (":f":f:q) <- words prompt = do
          e <- doesFileExist f
@@ -119,7 +126,7 @@ loop ctx prompt
          wait ctx
 
    tell :: String -> IO ()
-   tell s = putStrLn $ clr Dim $ ' ' : s <> "\n"
+   tell s = putStrLn $ clr Grey $ ' ' : s <> "\n"
 
    call :: Request -> String
    call r = unwords
@@ -149,7 +156,7 @@ loop ctx prompt
       , stop = Nothing
       , max_tokens = Nothing
       , presence_penalty = Nothing
-      , frequency_penalty = Just 1
+      , frequency_penalty = Just 1.4
       , logit_bias = Nothing
       , user = Nothing
       }
