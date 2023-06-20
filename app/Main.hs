@@ -90,7 +90,8 @@ loop ctx prompt
             , ":q\tquit"
             , ":r\trestart (beta)"
             , ":list\tlist sessions"
-            , ":save\tsave current session to a human readable format"
+            , ":saveall\tsave entire session in human readable format"
+            , ":save\tsave current context in human readable format"
             , ":stat\tshow memory status"
             , ":cpast\tclear past context (keeps current context)"
             , ":clogs\tclear current context (keeps past context)"
@@ -116,7 +117,12 @@ loop ctx prompt
          putStrLn $ clr Bold $ intercalate " " $ (clr Bold $ clr Inverse $ clr Magenta $ unwords ["",sess ctx,""]) : ((\s -> clr Inverse $ unwords ["",s,""]) <$> filter (/= sess ctx) l)
          putStrLn " "
          wait ctx
-      -- save current session
+      -- save entire session
+      | ":saveall" <- prompt = do
+         appendFile ("mem/" <> sess ctx <> ".txt") (unlines $ map (\m -> unwords [maybe "" id $ role m,":",maybe "" id $ content m,"\n"]) $ past ctx <> logs ctx)
+         tell $ unwords ["saved:",sess ctx]
+         wait ctx
+      -- save current context
       | ":save" <- prompt = do
          appendFile ("mem/" <> sess ctx <> ".txt") (unlines $ map (\m -> unwords [maybe "" id $ role m,":",maybe "" id $ content m,"\n"]) $ logs ctx)
          tell $ unwords ["saved:",sess ctx]
