@@ -119,7 +119,7 @@ loop ctx prompt
          wait ctx
       -- save entire session
       | ":saveall" <- prompt = do
-         appendFile ("mem/" <> sess ctx <> ".txt") (unlines $ map (\m -> unwords [maybe "" id $ role m,":",maybe "" id $ content m,"\n"]) $ past ctx <> logs ctx)
+         writeFile ("mem/" <> sess ctx <> "_all.txt") (unlines $ map (\m -> unwords [maybe "" id $ role m,":",maybe "" id $ content m,"\n"]) $ past ctx <> logs ctx)
          tell $ unwords ["saved:",sess ctx]
          wait ctx
       -- save current context
