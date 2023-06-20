@@ -9,7 +9,7 @@ import System.Process
 import System.Console.Readline ( readline, addHistory )
 import System.IO
 import Data.Maybe ( listToMaybe, catMaybes )
-import Data.List ( intercalate )
+import Data.List ( intercalate, sort )
 import Data.Foldable ( toList )
 import Data.Aeson ( encode, decodeStrict, encodeFile, decodeFileStrict )
 import Data.ByteString.Lazy.UTF8 qualified as BU ( toString )
@@ -44,7 +44,7 @@ main = do
    sess <- maybe "none" id . listToMaybe <$> getArgs
    let path = "mem/" <> sess <> "/"
    createDirectoryIfMissing True path
-   files <- listDirectory path
+   files <- sort <$> listDirectory path
    past <- fmap (mconcat . catMaybes) . sequence $ decodeFileStrict <$> (path <>) <$> files
    time <- formatTime defaultTimeLocale "%Y%m%d%H%M%S" <$> getCurrentTime
    let file = path <> time <> ".json"
@@ -112,7 +112,7 @@ loop ctx prompt
          main
       -- list sessions
       | ":list" <- prompt = do
-         l <- listDirectory "mem"
+         l <- sort <$> listDirectory "mem"
          tell "list sessions"
          putStrLn $ clr Bold $ intercalate " " $ (clr Bold $ clr Inverse $ clr Magenta $ unwords ["",sess ctx,""]) : ((\s -> clr Inverse $ unwords ["",s,""]) <$> filter (/= sess ctx) l)
          putStrLn " "
