@@ -15,29 +15,28 @@ import Data.Aeson ( encode, decodeStrict, encodeFile, decodeFileStrict )
 import Data.ByteString.Lazy.UTF8 qualified as BU ( toString )
 import Data.Text qualified as T ( pack )
 import Data.Text.Encoding ( encodeUtf8 )
-import Data.DList ( DList, singleton, snoc )
+import Data.DList ( DList, snoc )
 import Data.Time.Clock ( getCurrentTime )
 import Data.Time.Format ( formatTime, defaultTimeLocale )
 import Control.Monad ( when )
 
 data Ctx = Ctx
-   { key  :: String
-   , sess :: String
-   , file :: String
-   , past :: [Message]
-   , logs :: DList Message
-   , pipe :: DList String
+   { key  :: String  -- API key ( file can contain multiple lines, first one is used )
+   , sess :: String  -- session name
+   , file :: String  -- current log file
+   , past :: [Message]  -- mem past context
+   , logs :: [Message]  -- mem current context
+   , pipe :: DList String  -- mem stream buffer
    }
 
-sys :: Message
-sys = Message
+prime :: Message
+prime = Message
    { role = Just "system"
-   , content = Just prime
-   , name = Nothing
+   , content = Just m
+   , name = Just "stick"
    , function_call = Nothing
    }
-   where
-   prime = "You are a humble robot that gives short and to the point answers."
+   where m = "You are a humble AI that gives short and to the point answers. No chattiness. No false information. No wrong answers. Admits when unsure. Strongly avoids repetition."
 
 main :: IO ()
 main = do
@@ -49,14 +48,15 @@ main = do
    past <- fmap (mconcat . catMaybes) . sequence $ decodeFileStrict <$> (path <>) <$> files
    time <- formatTime defaultTimeLocale "%Y%m%d%H%M%S" <$> getCurrentTime
    let file = path <> time <> ".json"
-   let ctx = Ctx key sess file (if sess == "none" then mempty else past) (singleton sys) mempty
+   let ctx = Ctx key sess file (if sess == "none" then mempty else past) (if null past then [prime] else []) mempty
    -- add past to commandline history
    mapM_ (addHistory . maybe "" id . content) $ filter ((Just "user" ==) . role) past
    _ <- system "clear"
    hSetBuffering stdout NoBuffering
    putStrLn $ clr Bold $ clr Inverse $ clr Magenta $ unwords ["",sess,""]
-   putStr "\n"
+   putStrLn " "
    wait ctx
+   where
 
 wait :: Ctx -> IO ()
 wait ctx = do
@@ -73,7 +73,7 @@ loop ctx prompt
    | null prompt = wait ctx
    | ':' <- head prompt = comm
    | otherwise = do
-      putStr "\n"
+      putStrLn " "
       logs' <- mem ctx "user" prompt
       o <- createProcess (shell $ call $ req logs') { std_out = CreatePipe , std_err = NoStream }
       ctx' <- res (ctx { logs = logs' }) o
@@ -85,7 +85,21 @@ loop ctx prompt
    comm
       -- help
       | ":h" <- prompt = do
-         tell "help\n\n:q\tquit\n:l\tlist sessions\n:s\tsave current session to a human readable format\n:c\tclear past context (keeps current session)\n:f ...\tinclude a file"
+         tell $ unlines
+            ["help\n"
+            , ":q\tquit"
+            , ":r\trestart (beta)"
+            , ":list\tlist sessions"
+            , ":save\tsave current session to a human readable format"
+            , ":stat\tshow memory status"
+            , ":cpast\tclear past context (keeps current context)"
+            , ":clogs\tclear current context (keeps past context)"
+            , ":kpast\thalve past context (keeps current)"
+            , ":klogs\thalve current context (keeps past context)"
+            , ":stick\tstick last prompt + response"
+            , ":prime\tprime with system message"
+            , ":file ...\tinclude a file"
+            ]
          wait ctx
       -- quit
       | ":q" <- prompt = pure ()
@@ -96,23 +110,51 @@ loop ctx prompt
          tell "restart session"
          main
       -- list sessions
-      | ":l" <- prompt = do
+      | ":list" <- prompt = do
          l <- listDirectory "mem"
          tell "list sessions"
          putStrLn $ clr Bold $ intercalate " " $ (clr Bold $ clr Inverse $ clr Magenta $ unwords ["",sess ctx,""]) : ((\s -> clr Inverse $ unwords ["",s,""]) <$> filter (/= sess ctx) l)
-         putStrLn ""
+         putStrLn " "
          wait ctx
       -- save current session
-      | ":s" <- prompt = do
-         appendFile ("mem/" <> sess ctx <> ".txt") (unlines $ map (\m -> unwords [maybe "" id $ role m,":",maybe "" id $ content m,"\n"]) $ toList $ logs ctx)
+      | ":save" <- prompt = do
+         appendFile ("mem/" <> sess ctx <> ".txt") (unlines $ map (\m -> unwords [maybe "" id $ role m,":",maybe "" id $ content m,"\n"]) $ logs ctx)
          tell $ unwords ["saved:",sess ctx]
          wait ctx
+      -- show memory status
+      | ":stat" <- prompt = do
+         tell $ unwords ["past",show $ length $ past ctx,"/","logs",show $ length $ logs ctx]
+         wait ctx
       -- clear past context
-      | ":c" <- prompt = do
+      | ":cpast" <- prompt = do
          tell "cleared past context"
-         wait (ctx { past = [] })
+         wait (ctx { past = filter sticky $ past ctx })
+      -- clear current context
+      | ":clogs" <- prompt = do
+         tell "cleared current context"
+         wait (ctx { logs = filter sticky $ logs ctx })
+      -- halve past context (not past)
+      | ":kpast" <- prompt = do
+         tell "halved past context"
+         let (kill,rest) = splitAt (div (length $ past ctx) 2) $ past ctx
+         wait (ctx { past = filter sticky kill <> rest })
+      -- halve current context (not past)
+      | ":klogs" <- prompt = do
+         tell "halved current context"
+         let (kill,rest) = splitAt (div (length $ logs ctx) 2) $ logs ctx
+         wait (ctx { logs = filter sticky kill <> rest })
+      -- stick last prompt + response
+      | ":stick" <- prompt = do
+         tell "sticked last prompt + response"
+         let (l,s) = splitAt (length (logs ctx) - 2) $ logs ctx
+         wait (ctx { past = l <> map stick s })
+      -- prime with system message
+      | (":prime":p) <- words prompt = do
+         tell "primed"
+         logs' <- mem ctx "system" $ unwords p
+         wait (ctx { logs = logs' })
       -- include file
-      | (":f":f:q) <- words prompt = do
+      | (":file":f:q) <- words prompt = do
          e <- doesFileExist f
          if e then do
             i <- readFile f
@@ -143,10 +185,10 @@ loop ctx prompt
          | '\'' <- x = "'\\''" <> escape xs
          | otherwise = x : escape xs
 
-   req :: DList Message -> Request
+   req :: [Message] -> Request
    req l = Request
       { model = "gpt-3.5-turbo"
-      , messages = past ctx <> toList l
+      , messages = past ctx <> l
       , functions = Nothing
       , function_call = Nothing
       , temperature = Nothing
@@ -177,7 +219,7 @@ res ctx h
       eof <- hIsEOF o
       if eof then do
          logs' <- mem ctx "assistant" (concat $ toList $ pipe ctx)
-         putStr "\n"
+         putStrLn " "
          pure $ ctx { logs = logs' , pipe = mempty }
       else do
          ol <- hGetLine o
@@ -197,7 +239,7 @@ res ctx h
          pure e
       -- end of openai's Server Sent Event stream
       | "data: [DONE]" <- load = do
-         putStr "\n"
+         putStrLn " "
          pure ""
       -- SSE stream
       | ("data: ",d) <- splitAt 6 load , Just (json :: Response Delta) <- decodeStrict $ encodeUtf8 $ T.pack d = do
@@ -209,15 +251,17 @@ res ctx h
          putStrLn (clr Red load)
          pure ""
 
-mem :: Ctx -> String -> String -> IO (DList Message)
+mem :: Ctx -> String -> String -> IO [Message]
 mem ctx r c = do
    encodeFile (file ctx) logs'
    pure logs'
    where
-   logs' = snoc (logs ctx) $ Message
-      { role = Just r
-      , content = Just c
-      , name = Just $ sess ctx
-      , function_call = Nothing
-      }
+   logs' = logs ctx <>
+      [ Message
+         { role = Just r
+         , content = Just c
+         , name = Just $ sess ctx
+         , function_call = Nothing
+         }
+      ]
 

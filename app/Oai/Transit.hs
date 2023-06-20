@@ -30,6 +30,13 @@ data Message = Message
    , function_call :: Maybe Function
    } deriving Generic
 
+-- sticky interface
+sticky :: Message -> Bool
+sticky (Message _ _ n _) = n == Just "stick"
+
+stick :: Message -> Message
+stick (Message r c _ f) = Message r c (Just "stick") f
+
 instance ToJSON Message where
    toJSON = genericToJSON defaultOptions { omitNothingFields = True }
 instance FromJSON Message
