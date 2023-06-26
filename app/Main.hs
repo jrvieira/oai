@@ -84,14 +84,13 @@ loop ctx prompt
    comm :: IO ()
    comm
       -- help
-      | ":h" <- prompt = do
+      | elem prompt [":h",":help"] = do
          tell $ unlines
             ["help\n"
-            , ":q\tquit"
-            , ":r\trestart (beta)"
+            , ":quit\tquit"
+            , ":restart\trestart (beta)"
             , ":list\tlist sessions"
-            , ":saveall\tsave entire session in human readable format"
-            , ":save\tsave current context in human readable format"
+            , ":save\tsave entire session in human readable format"
             , ":stat\tshow memory status"
             , ":cpast\tclear past context (keeps current context)"
             , ":clogs\tclear current context (keeps past context)"
@@ -103,28 +102,23 @@ loop ctx prompt
             ]
          wait ctx
       -- quit
-      | ":q" <- prompt = pure ()
+      | elem prompt [":q",":quit"] = pure ()
       -- restart (beta)
-      | ":r" <- prompt = do
+      | elem prompt [":r",":restart"] = do
          e <- doesFileExist $ file ctx
          when e $ removeFile $ file ctx
          tell "restart session"
          main
       -- list sessions
-      | ":list" <- prompt = do
+      | elem prompt [":l",":list"] = do
          l <- sort <$> listDirectory "mem"
          tell "list sessions"
          putStrLn $ clr Bold $ intercalate " " $ (clr Bold $ clr Inverse $ clr Magenta $ unwords ["",sess ctx,""]) : ((\s -> clr Inverse $ unwords ["",s,""]) <$> filter (/= sess ctx) l)
          putStrLn " "
          wait ctx
       -- save entire session
-      | ":saveall" <- prompt = do
-         writeFile ("mem/" <> sess ctx <> "_all.txt") (unlines $ map (\m -> unwords [maybe "" id $ role m,":",maybe "" id $ content m,"\n"]) $ past ctx <> logs ctx)
-         tell $ unwords ["saved:",sess ctx]
-         wait ctx
-      -- save current context
-      | ":save" <- prompt = do
-         appendFile ("mem/" <> sess ctx <> ".txt") (unlines $ map (\m -> unwords [maybe "" id $ role m,":",maybe "" id $ content m,"\n"]) $ logs ctx)
+      | elem prompt [":s",":save"] = do
+         writeFile ("mem/" <> sess ctx <> ".txt") (unlines $ map (\m -> unwords [maybe "" id $ role m,":",maybe "" id $ content m,"\n"]) $ past ctx <> logs ctx)
          tell $ unwords ["saved:",sess ctx]
          wait ctx
       -- show memory status
@@ -160,7 +154,7 @@ loop ctx prompt
          logs' <- mem ctx "system" $ unwords p
          wait (ctx { logs = logs' })
       -- include file
-      | (":file":f:q) <- words prompt = do
+      | (c:f:q) <- words prompt , elem c [":f",":file"] = do
          e <- doesFileExist f
          if e then do
             i <- readFile f
