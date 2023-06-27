@@ -72,6 +72,10 @@ loop :: Ctx -> String -> IO ()
 loop ctx prompt
    | null prompt = wait ctx
    | ':' <- head prompt = comm
+   | ('!':q) <- prompt = do
+      o <- readProcess "sh" ["-c",q] ""
+      putStrLn o
+      wait ctx
    | otherwise = do
       putStrLn " "
       logs' <- mem ctx "user" prompt
