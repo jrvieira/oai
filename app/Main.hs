@@ -98,8 +98,8 @@ loop ctx prompt
             , ":stat\tshow memory status"
             , ":cpast\tclear past context (keeps current context)"
             , ":clogs\tclear current context (keeps past context)"
-            , ":kpast\thalve past context (keeps current)"
-            , ":klogs\thalve current context (keeps past context)"
+            , ":kp\thalve past context (keeps current)"
+            , ":kl\thalve current context (keeps past context)"
             , ":stick\tstick last prompt + response"
             , ":prime\tprime with system message"
             , ":file ...\tinclude a file"
@@ -138,12 +138,12 @@ loop ctx prompt
          tell "cleared current context"
          wait (ctx { logs = filter sticky $ logs ctx })
       -- halve past context (not past)
-      | ":kpast" <- prompt = do
+      | ":kp" <- prompt = do
          tell "halved past context"
          let (kill,rest) = splitAt (div (length $ past ctx) 2) $ past ctx
          wait (ctx { past = filter sticky kill <> rest })
       -- halve current context (not past)
-      | ":klogs" <- prompt = do
+      | ":kl" <- prompt = do
          tell "halved current context"
          let (kill,rest) = splitAt (div (length $ logs ctx) 2) $ logs ctx
          wait (ctx { logs = filter sticky kill <> rest })
